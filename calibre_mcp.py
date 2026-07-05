@@ -13,8 +13,48 @@ Configuration via environment variables (with sensible Windows defaults):
 
 from __future__ import annotations
 
-import json
 import os
+import sys
+
+# --- Windows MCP stdio fix (must run BEFORE importing fastmcp) --------------
+# The MCP SDK frames messages with TextIOWrapper(sys.stdout.buffer) using the
+# default newline=None, which on Windows rewrites every '\n' as '\r\n'. That
+# stray '\r' corrupts the newline-delimited JSON-RPC stream and hangs clients
+# (os.linesep and fd binary-mode do NOT help — the CRLF is baked into
+# TextIOWrapper). Interpose a binary writer on sys.stdout.buffer that strips the
+# '\r' back out, so the SDK's wrapper ends up emitting clean LF.
+if sys.platform == "win32":
+
+    class _LFBuffer:
+        """Binary writer proxy that rewrites b'\\r\\n' -> b'\\n'."""
+
+        def __init__(self, raw):
+            self._raw = raw
+
+        def write(self, data):
+            # Strip all raw CR bytes. A literal 0x0D never appears in MCP's
+            # UTF-8 JSON (a CR inside a string is escaped as \r), so the only
+            # source is Windows newline translation — safe to remove wholesale,
+            # and robust to '\r'/'\n' landing in separate write() calls.
+            return self._raw.write(data.replace(b"\r", b""))
+
+        def __getattr__(self, name):
+            return getattr(self._raw, name)
+
+    class _StdoutProxy:
+        """sys.stdout stand-in whose .buffer is the LF-stripping writer."""
+
+        def __init__(self, real):
+            self._real = real
+            self.buffer = _LFBuffer(real.buffer)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    sys.stdout = _StdoutProxy(sys.stdout)
+# ---------------------------------------------------------------------------
+
+import json
 import subprocess
 
 from fastmcp import FastMCP
@@ -38,13 +78,34 @@ mcp = FastMCP("calibre-mcp")
 def _calibredb(*args: str) -> str:
     """Run calibredb against the configured library and return stdout."""
     cmd = [CALIBREDB, *args, "--with-library", LIBRARY]
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
-    if proc.returncode != 0:
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            # CRITICAL: this server talks MCP over stdio. Without redirecting
+            # stdin, calibredb inherits that pipe and blocks on it forever,
+            # hanging every tool call. Give it an empty stdin instead.
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
         raise RuntimeError(
-            f"calibredb failed ({proc.returncode}): "
-            f"{proc.stderr.strip() or 'unknown error'}"
+            "calibredb timed out after 60s. If the Calibre app is open, close it "
+            "(it blocks direct library access) and try again."
+        )
+    if proc.returncode != 0:
+        err = proc.stderr.strip()
+        if "Another calibre program" in err or "is running" in err:
+            raise RuntimeError(
+                "Calibre appears to be open. calibredb cannot read the library "
+                "directly while the Calibre desktop app is running. Please close "
+                "Calibre and try again (or run Calibre's Content Server)."
+            )
+        raise RuntimeError(
+            f"calibredb failed ({proc.returncode}): {err or 'unknown error'}"
         )
     return proc.stdout
 
@@ -100,8 +161,13 @@ def list_recent(limit: int = 10) -> list[dict]:
 
 
 def main() -> None:
-    """Entry point: run the MCP server over stdio."""
-    mcp.run()
+    """Entry point: run the MCP server over stdio.
+
+    Windows stdio is normalized to LF-only at module import (see top of file).
+    The FastMCP banner is disabled: it prints to stderr, and a client that does
+    not promptly drain stderr can stall the server at startup.
+    """
+    mcp.run(show_banner=False)
 
 
 if __name__ == "__main__":
