@@ -12,10 +12,11 @@ just set the two environment variables below.
 
 | Tool | Description |
 |------|-------------|
-| `search_books(query, limit=20)` | Search using Calibre's search syntax (e.g. `author:Erikson`, `tag:Fantasy`, `series:"Malazan"`). |
-| `list_books(limit=50, sort_by="timestamp", ascending=False)` | List/browse the library, sorted. |
+| `search_books(query, limit=20, offset=0)` | Search using Calibre's search syntax (e.g. `author:Erikson`, `tag:Fantasy`, `series:"Malazan"`); page with `offset`. |
+| `list_books(limit=50, offset=0, sort_by="timestamp", ascending=False)` | List/browse the library, sorted; page through it with `offset`. |
 | `get_book(book_id)` | Full metadata for one book by its Calibre ID. |
 | `list_recent(limit=10)` | Most recently added books. |
+| `count_books()` | Total number of books in the library. |
 
 ## Requirements
 

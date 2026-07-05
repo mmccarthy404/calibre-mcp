@@ -117,29 +117,35 @@ def _list(*extra: str) -> list[dict]:
 
 
 @mcp.tool()
-def search_books(query: str, limit: int = 20) -> list[dict]:
+def search_books(query: str, limit: int = 20, offset: int = 0) -> list[dict]:
     """Search the Calibre library using Calibre's search syntax.
 
     Examples: ``author:Erikson``, ``title:Malazan``, ``tag:Fantasy``,
-    ``series:"Malazan Book of the Fallen"``, or plain free text. Returns
-    matching books with their core metadata. Read-only.
+    ``series:"Malazan Book of the Fallen"``, or plain free text. Use ``offset``
+    to page through matches. Read-only.
     """
-    return _list("--search", query, "--limit", str(limit))
+    return _list("--search", query, "--limit", str(offset + limit))[offset:]
 
 
 @mcp.tool()
 def list_books(
-    limit: int = 50, sort_by: str = "timestamp", ascending: bool = False
+    limit: int = 50,
+    offset: int = 0,
+    sort_by: str = "timestamp",
+    ascending: bool = False,
 ) -> list[dict]:
-    """List books in the library, sorted (default: newest first). Read-only.
+    """List books in the library, sorted. Read-only.
 
+    Use ``offset`` to page through the whole library. (calibredb has no native
+    offset, so this fetches offset+limit rows and drops the first ``offset``.)
+    For a small library, just pass a large ``limit`` to get everything at once.
     ``sort_by`` accepts any Calibre column, e.g. ``title``, ``authors``,
     ``pubdate``, ``timestamp``, ``rating``.
     """
-    extra = ["--limit", str(limit), "--sort-by", sort_by]
+    extra = ["--limit", str(offset + limit), "--sort-by", sort_by]
     if ascending:
         extra.append("--ascending")
-    return _list(*extra)
+    return _list(*extra)[offset:]
 
 
 @mcp.tool()
@@ -158,6 +164,17 @@ def get_book(book_id: int) -> dict:
 def list_recent(limit: int = 10) -> list[dict]:
     """List the most recently added books (newest first). Read-only."""
     return _list("--sort-by", "timestamp", "--limit", str(limit))
+
+
+@mcp.tool()
+def count_books() -> int:
+    """Return the total number of books in the library. Read-only.
+
+    Call this first to know how many books exist, then fetch them all with
+    ``list_books(limit=<count>)`` or page with ``offset``.
+    """
+    out = _calibredb("list", "--for-machine", "--fields", "id", "--limit", "1000000000")
+    return len(json.loads(out or "[]"))
 
 
 def main() -> None:
