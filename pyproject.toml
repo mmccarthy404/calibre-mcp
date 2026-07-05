@@ -1,0 +1,15 @@
+[project]
+name = "calibre-mcp"
+version = "0.1.0"
+description = "Minimal read-only Calibre MCP server for Windows, wrapping calibredb."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["fastmcp>=2.0"]
+
+[project.scripts]
+calibre-mcp = "calibre_mcp:main"
+
+# This is a single-module project, not a distributable package; tell uv not to
+# try to build/install it — we just want its dependencies in the venv.
+[tool.uv]
+package = false
